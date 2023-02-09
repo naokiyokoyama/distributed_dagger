@@ -11,7 +11,7 @@ class DaggerBase:
     def __init__(
         self,
         envs: Any,
-        policy: torch.nn.Module,
+        actor_critic: torch.nn.Module,
         optimizer: optim.Optimizer,
         batch_length: int,
         total_num_steps: int,
@@ -24,7 +24,7 @@ class DaggerBase:
         checkpoint_folder: str = "",
     ):
         self.envs = envs
-        self.policy = policy
+        self.actor_critic = actor_critic
         self.optimizer = optimizer
         self.batch_length = batch_length
         self.total_num_steps = total_num_steps
@@ -47,7 +47,7 @@ class DaggerBase:
         return self.envs.num_envs
 
     def get_model_params(self):
-        return self.policy.parameters()
+        return self.actor_critic.parameters()
 
     def setup_tensorboard(self):
         if self.tb_dir != "":
@@ -81,7 +81,7 @@ class DaggerBase:
 
     def get_checkpoint(self, iteration, batch_num):
         checkpoint = {
-            "state_dict": self.policy.state_dict(),
+            "state_dict": self.actor_critic.state_dict(),
             "iteration": iteration,
             "batch": batch_num,
         }
@@ -104,7 +104,7 @@ class DaggerBase:
         action_loss = torch.tensor(0, device=self.device)
         while self.percent_done() < 1.0:
             teacher_actions = self.get_teacher_actions(observations)
-            student_actions = self.policy(observations)
+            student_actions = self.actor_critic(observations)
             actions = teacher_actions if self.teacher_forcing else student_actions
 
             action_loss += self.action_loss(actions, teacher_actions)
