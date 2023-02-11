@@ -56,7 +56,8 @@ class DAggerBase:
         self.envs.step() """
         raise NotImplementedError
 
-    def update_tensorboard(self, observations, rewards, dones, infos, action_loss):
+    def update_metrics(self, observations, rewards, dones, infos, action_loss):
+        """Print, log, tensorboard, or otherwise record metrics for this iteration"""
         raise NotImplementedError
 
     def setup_tensorboard(self):
@@ -128,8 +129,6 @@ class DAggerBase:
 
             observations, rewards, dones, infos = self.step_envs(actions)
 
-            self.update_tensorboard(observations, rewards, dones, infos, action_loss)
-
             if self.num_train_iter % self.batch_length == 0:
                 self.optimizer.zero_grad()
                 action_loss = action_loss.mean() / self.batch_length
@@ -140,12 +139,12 @@ class DAggerBase:
                 action_loss = None
 
                 if self.should_save_now():
-                    # Save checkpoint
-                    ckpt, ckpt_path = self.generate_checkpoint()
-                    torch.save(ckpt, ckpt_path)
+                    torch.save(*self.generate_checkpoint())
 
             self.num_steps_done += self.num_envs
             self.num_train_iter += 1
+
+            self.update_metrics(observations, rewards, dones, infos, action_loss)
 
 
 class DAggerDDP(DecentralizedDistributedMixin, DAggerBase):

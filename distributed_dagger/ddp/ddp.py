@@ -79,6 +79,8 @@ class _ComputeLogProbsWrapper(torch.nn.Module):
 
 class DecentralizedDistributedMixin:
     _is_distributed: bool = True
+    actor_critic: torch.nn.Module
+    device: torch.device
 
     @staticmethod
     def _compute_var_mean(x):
