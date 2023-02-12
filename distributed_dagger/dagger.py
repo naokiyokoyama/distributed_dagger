@@ -148,4 +148,7 @@ class DAggerBase:
 
 
 class DAggerDDP(DecentralizedDistributedMixin, DAggerBase):
-    pass
+    def train(self):
+        if self._is_distributed:
+            torch.distributed.barrier()
+        super().train()
