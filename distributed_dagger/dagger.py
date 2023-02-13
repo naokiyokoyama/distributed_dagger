@@ -99,6 +99,8 @@ class DAggerBase:
         filename = f"ckpt.{self.ckpt_id}_{self.num_updates_done}.pth"
         ckpt_path = osp.join(self.checkpoint_folder, filename)
         self.ckpt_id += 1
+        if not os.path.exists(self.checkpoint_folder):
+            os.makedirs(self.checkpoint_folder)
         return checkpoint, ckpt_path
 
     def percent_done(self) -> float:
@@ -137,9 +139,6 @@ class DAggerBase:
 
                 self.num_updates_done += 1
                 action_loss = None
-
-                if self.should_save_now():
-                    torch.save(*self.generate_checkpoint())
 
             self.num_steps_done += self.num_envs
             self.num_train_iter += 1
