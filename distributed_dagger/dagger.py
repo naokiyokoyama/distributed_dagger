@@ -48,12 +48,12 @@ class DAggerBase:
 
     def get_teacher_actions(self, observations):
         """Applied to output of self.transform_observations(), sent to
-        self.action_loss() """
+        self.action_loss()"""
         raise NotImplementedError
 
     def get_student_actions(self, observations):
         """Applied to output of self.transform_observations(), sent to
-        self.envs.step() """
+        self.envs.step()"""
         raise NotImplementedError
 
     def update_metrics(self, observations, rewards, dones, infos, action_loss):
@@ -115,11 +115,13 @@ class DAggerBase:
             and self.checkpoint_folder != ""
         )
 
-    def train(self):
+    def train_setup(self):
         self.setup_tensorboard()
         observations = self.envs.reset()
         observations = self.transform_observations(observations)
+        return observations
 
+    def train_loop(self, observations):
         action_loss = None
         while self.percent_done() < 1.0:
             teacher_actions = self.get_teacher_actions(observations)
@@ -144,6 +146,10 @@ class DAggerBase:
             self.num_train_iter += 1
 
             self.update_metrics(observations, rewards, dones, infos, action_loss)
+
+    def train(self):
+        observations = self.train_setup()
+        self.train_loop(observations)
 
 
 class DAggerDDP(DecentralizedDistributedMixin, DAggerBase):
