@@ -3,8 +3,8 @@
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
-
-from typing import Tuple
+import functools
+from typing import Callable, Optional, Tuple, Union, overload
 
 import numpy as np
 import torch
@@ -59,7 +59,68 @@ def distributed_var_mean(
     return var, mean
 
 
-class _ComputeLogProbsWrapper(torch.nn.Module):
+def all_reduce(t: torch.Tensor, device=torch.device) -> torch.Tensor:
+    r"""All reduce helper method that moves things to the correct
+    device and only runs if distributed
+    """
+    orig_device = t.device
+    t = t.to(device=device)
+    torch.distributed.all_reduce(t)
+
+    return t.to(device=orig_device)
+
+
+@overload
+def rank0_only() -> bool:
+    ...
+
+
+@overload
+def rank0_only(fn: Callable) -> Callable:
+    ...
+
+
+def rank0_only(fn: Optional[Callable] = None) -> Union[Callable, bool]:
+    r"""Helper function to only execute code if a process is world rank 0
+
+    Can be used both as a function in an if statement,
+
+    .. code:: py
+
+        if rank0_only():
+            ...
+
+    or as a decorator,
+
+    .. code:: py
+
+        @rank0_only
+        def fn_for_r0_only(...):
+            ...
+
+    :param fn: Function to wrap and only execute if the process is rank 0.
+        If a process is rank 0, the function will be run and it's return value
+        will be returned.  If a process is not rank 0, then the function will not
+        be ran and :py:`None` will be returned.
+
+    :return: The wrapped function if :p:`fn` is not :py:`None`, otherwise
+        whether or not this process is rank 0
+    """
+    if fn is None:
+        return (
+            not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0
+        )
+
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        if rank0_only():
+            return fn(*args, **kwargs)
+        return None
+
+    return _wrapper
+
+
+class _GradFnWrapper(torch.nn.Module):
     r"""Wrapper on compute_log_probs that allows that to be called from forward.
     This is needed to interface with DistributedDataParallel's forward call
     """
@@ -68,17 +129,16 @@ class _ComputeLogProbsWrapper(torch.nn.Module):
         super().__init__()
         self.actor_critic = actor_critic
 
-    def forward(self, *args, **kwargs):
+    def forward(self, actor_critic_grad_fn_name, *args, **kwargs):
         # We then convert numpy arrays back to a CPU tensor.
         # This is needed for older versions of pytorch that haven't deprecated
         # the single-process multi-device version of DDP
-        return self.actor_critic.compute_log_probs(
-            *_numpy_to_cpu(args), **_numpy_to_cpu(kwargs)
-        )
+        func = getattr(self.actor_critic, actor_critic_grad_fn_name)
+        return func(*_numpy_to_cpu(args), **_numpy_to_cpu(kwargs))
 
 
 class DecentralizedDistributedMixin:
-    _is_distributed: bool = True
+    is_distributed: bool = False
     actor_critic: torch.nn.Module
     device: torch.device
 
@@ -115,20 +175,21 @@ class DecentralizedDistributedMixin:
                         find_unused_parameters=find_unused_params,
                     )
 
-        self._compute_log_probs_wrapper = Guard(
-            _ComputeLogProbsWrapper(self.actor_critic), self.device
-        )
+        self._with_grad_wrapper = Guard(_GradFnWrapper(self.actor_critic), self.device)
+        self.is_distributed = True
 
-    def _compute_log_probs(self, *args, **kwargs):
+    def _with_grad(self, actor_critic_grad_fn_name, *args, **kwargs):
         r"""Internal method that calls Policy.compute_log_probs.  This is used instead
         of calling that directly so that that call can be overrided with inheritance
         """
-        if not self._is_distributed:
-            return super()._compute_log_probs(*args, **kwargs)  # noqa
+        if not self.is_distributed:
+            return super()._with_grad(
+                actor_critic_grad_fn_name, *args, **kwargs
+            )  # noqa
         # DistributedDataParallel moves all tensors to the device (or devices)
         # So we need to make anything that is on the CPU into a numpy array
         # This is needed for older versions of pytorch that haven't deprecated
         # the single-process multi-device version of DDP
-        return self._compute_log_probs_wrapper.ddp(
-            *_cpu_to_numpy(args), **_cpu_to_numpy(kwargs)
+        return self._with_grad_wrapper.ddp(
+            actor_critic_grad_fn_name, *_cpu_to_numpy(args), **_cpu_to_numpy(kwargs)
         )
